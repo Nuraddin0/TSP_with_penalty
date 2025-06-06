@@ -212,7 +212,7 @@ void iterated_local_search(int* tour, int* tour_size, int iterations) {
 
 int main() {
     srand(time(NULL));
-    read_input("example-input-1.txt");
+    read_input("example-input-3.txt");
 
     int* tour = malloc(sizeof(int) * city_count);
     nearest_neighbour(tour);
@@ -227,8 +227,8 @@ int main() {
 
     three_opt_with_candidates(tour, tour_size);
     two_opt_with_candidates(tour, tour_size);
+    iterated_local_search(tour, &tour_size, 100);
     two_opt_with_candidates(tour, tour_size);
-    iterated_local_search(tour, &tour_size, 20);
 
     int final_cost = compute_tour_cost(tour, tour_size) + (penalty * (city_count - tour_size));
     printf("Final tour cost: %d\n", final_cost);
@@ -239,6 +239,7 @@ int main() {
         for (int i = 0; i < tour_size; i++) {
             fprintf(out, "%d\n", cities[tour[i]].id);
         }
+        fprintf(out, "%d\n", cities[tour[0]].id);
         fclose(out);
         printf("Tour saved to final_tour.txt\n");
     } else {
