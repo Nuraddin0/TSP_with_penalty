@@ -119,81 +119,55 @@ void apply_2opt() {
     }
 }
 
-// Full 3-opt with all 7 reconnection cases
 void apply_3opt() {
-    int improved = 1;
-    while (improved) {
-        improved = 0;
-        for (int i = 0; i < N && !improved; i++) {
-            int A = tour[i];
-            int B = tour[(i+1)%N];
-            for (int k1 = 0; k1 < K_NEAREST && !improved; k1++) {
-                int Cidx = candidate[A][k1].node;
-                int j = position[Cidx];
-                if (j == i || j == (i+1)%N) continue;
-                int C = tour[j];
-                int D = tour[(j+1)%N];
-                for (int k2 = 0; k2 < K_NEAREST && !improved; k2++) {
-                    int Eidx = candidate[B][k2].node;
-                    int l = position[Eidx];
-                    if (l == i || l == j || l == (j+1)%N) continue;
-                    int E = tour[l];
-                    int F = tour[(l+1)%N];
-
-                    int old_cost = distance_nodes(A,B) + distance_nodes(C,D) + distance_nodes(E,F);
-                    int new_cost;
-
+    int improved=1;
+    while(improved){ improved=0;
+        for(int i=0;i<N && !improved;i++){
+            int A=tour[i], B=tour[(i+1)%N];
+            for(int k1=0;k1<K_NEAREST && !improved;k1++){
+                int Cidx=candidate[A][k1].node, j=position[Cidx];
+                if(j==i||(j==(i+1)%N)) continue;
+                int C=tour[j], D=tour[(j+1)%N];
+                for(int k2=0;k2<K_NEAREST && !improved;k2++){
+                    int Eidx=candidate[B][k2].node, l=position[Eidx];
+                    if(l==i||l==j||(l==(j+1)%N)) continue;
+                    int E=tour[l], F=tour[(l+1)%N];
+                    int oldc=distance_nodes(A,B)+distance_nodes(C,D)+distance_nodes(E,F);
+                    int newc;
                     // Case 1: A->C, B->E, D->F
-                    new_cost = distance_nodes(A,C) + distance_nodes(B,E) + distance_nodes(D,F);
-                    if (new_cost < old_cost) {
-                        // reverse segment B->D, then D->F
-                        int lo = (i+1)%N, hi = j;
-                        while (lo != hi && (lo+N-1)%N != hi) {
-                            int tmp = tour[lo]; tour[lo] = tour[hi]; tour[hi] = tmp;
-                            position[tour[lo]] = lo; position[tour[hi]] = hi;
-                            lo = (lo+1)%N; hi = (hi-1+N)%N;
-                        }
-                        lo = (j+1)%N; hi = l;
-                        while (lo != hi && (lo+N-1)%N != hi) {
-                            int tmp = tour[lo]; tour[lo] = tour[hi]; tour[hi] = tmp;
-                            position[tour[lo]] = lo; position[tour[hi]] = hi;
-                            lo = (lo+1)%N; hi = (hi-1+N)%N;
-                        }
-                        improved = 1;
-                        break;
-                    }
+                    newc=distance_nodes(A,C)+distance_nodes(B,E)+distance_nodes(D,F);
+                    if(newc<oldc){ reverse_segment((i+1)%N,j); reverse_segment((j+1)%N,l); improved=1; break; }
                     // Case 2: A->C, B->D, E->F
-                    new_cost = distance_nodes(A,C) + distance_nodes(B,D) + distance_nodes(E,F);
-                    if (new_cost < old_cost) {
-                        // reverse segment B->j, skip D-F
-                        int lo = (i+1)%N, hi = j;
-                        while (lo != hi && (lo+N-1)%N != hi) {
-                            int tmp = tour[lo]; tour[lo] = tour[hi]; tour[hi] = tmp;
-                            position[tour[lo]] = lo; position[tour[hi]] = hi;
-                            lo = (lo+1)%N; hi = (hi-1+N)%N;
-                        }
-                        improved = 1;
-                        break;
-                    }
+                    newc=distance_nodes(A,C)+distance_nodes(B,D)+distance_nodes(E,F);
+                    if(newc<oldc){ reverse_segment((i+1)%N,j); improved=1; break; }
                     // Case 3: A->B, C->E, D->F
-                    new_cost = distance_nodes(A,B) + distance_nodes(C,E) + distance_nodes(D,F);
-                    if (new_cost < old_cost) {
-                        // reverse segment C->l
-                        int lo = (j+1)%N, hi = l;
-                        while (lo != hi && (lo+N-1)%N != hi) {
-                            int tmp = tour[lo]; tour[lo] = tour[hi]; tour[hi] = tmp;
-                            position[tour[lo]] = lo; position[tour[hi]] = hi;
-                            lo = (lo+1)%N; hi = (hi-1+N)%N;
-                        }
-                        improved = 1;
-                        break;
-                    }
-                    // Cases 4-7 analogous: combine segment reversals accordingly
+                    newc=distance_nodes(A,B)+distance_nodes(C,E)+distance_nodes(D,F);
+                    if(newc<oldc){ reverse_segment((j+1)%N,l); improved=1; break; }
                     // Case 4: A->D, E->B, C->F
+                    newc=distance_nodes(A,D)+distance_nodes(E,B)+distance_nodes(C,F);
+                    if(newc<oldc){
+                        reverse_segment((i+1)%N,j);
+                        reverse_segment((i+1)%N,l);
+                        improved=1; break; }
                     // Case 5: A->E, D->B, C->F
+                    newc=distance_nodes(A,E)+distance_nodes(D,B)+distance_nodes(C,F);
+                    if(newc<oldc){
+                        reverse_segment((j+1)%N,l);
+                        reverse_segment((i+1)%N,l);
+                        improved=1; break; }
                     // Case 6: A->D, B->F, C->E
+                    newc=distance_nodes(A,D)+distance_nodes(B,F)+distance_nodes(C,E);
+                    if(newc<oldc){
+                        reverse_segment((j+1)%N,l);
+                        reverse_segment((i+1)%N,j);
+                        improved=1; break; }
                     // Case 7: A->E, D->F, C->B
-                    // (Implement similar to above: compute new_cost, reverse required segments)
+                    newc=distance_nodes(A,E)+distance_nodes(D,F)+distance_nodes(C,B);
+                    if(newc<oldc){
+                        reverse_segment((i+1)%N,j);
+                        reverse_segment((j+1)%N,l);
+                        reverse_segment((i+1)%N,l);
+                        improved=1; break; }
                 }
             }
         }
