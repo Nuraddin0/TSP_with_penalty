@@ -5,9 +5,16 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <limits.h>
 
 #define MAX_CITIES 50000
 #define CANDIDATE_K 10
+
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
+#endif
 
 typedef struct {
     int id;
@@ -20,6 +27,20 @@ int city_count = 0;
 City cities[MAX_CITIES];
 int candidate_set[MAX_CITIES][CANDIDATE_K];
 int used[MAX_CITIES];
+
+void print_memory_usage() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX memInfo;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&memInfo, sizeof(memInfo))) {
+        SIZE_T rss = memInfo.WorkingSetSize;
+        printf("Memory usage (RSS): %.2f MB\n", rss / (1024.0 * 1024.0));
+    } else {
+        printf("Unable to get memory info.\n");
+    }
+#else
+    printf("Memory usage logging not supported on this platform.\n");
+#endif
+}
 
 int distance(City a, City b) {
     int dx = a.x - b.x;
@@ -42,9 +63,9 @@ void read_input(const char* filename) {
 
 void build_candidate_set() {
     for (int i = 0; i < city_count; i++) {
-        double dists[MAX_CITIES]; int ids[MAX_CITIES];
+        int dists[MAX_CITIES]; int ids[MAX_CITIES];
         for (int j = 0; j < city_count; j++) {
-            dists[j] = (i == j) ? 1e9 : distance(cities[i], cities[j]);
+            dists[j] = (i == j) ? INT_MAX : distance(cities[i], cities[j]);
             ids[j] = j;
         }
         for (int k = 0; k < CANDIDATE_K; k++) {
@@ -52,7 +73,7 @@ void build_candidate_set() {
             for (int j = k + 1; j < city_count; j++) {
                 if (dists[j] < dists[min_idx]) min_idx = j;
             }
-            double temp_d = dists[k]; dists[k] = dists[min_idx]; dists[min_idx] = temp_d;
+            int temp_d = dists[k]; dists[k] = dists[min_idx]; dists[min_idx] = temp_d;
             int temp_id = ids[k]; ids[k] = ids[min_idx]; ids[min_idx] = temp_id;
             candidate_set[i][k] = ids[k];
         }
@@ -60,22 +81,40 @@ void build_candidate_set() {
 }
 
 void nearest_neighbour(int* tour) {
-    for (int i = 0; i < city_count; i++) used[i] = 0;
+    for (int i = 0; i < city_count; i++) {
+        cities[i].visited = 0;
+        used[i] = 0;
+    }
     int current = 0;
     cities[current].visited = 1;
-    tour[0] = current;
     used[current] = 1;
+    tour[0] = current;
     for (int i = 1; i < city_count; i++) {
         int next = -1, min_dist = 1e9;
-        for (int j = 0; j < city_count; j++) {
-            if (!cities[j].visited) {
-                int d = distance(cities[current], cities[j]);
-                if (d < min_dist) { min_dist = d; next = j; }
+        for (int k = 0; k < CANDIDATE_K; k++) {
+            int candidate = candidate_set[current][k];
+            if (!cities[candidate].visited) {
+                int d = distance(cities[current], cities[candidate]);
+                if (d < min_dist) {
+                    min_dist = d;
+                    next = candidate;
+                }
+            }
+        }
+        if (next == -1) {
+            for (int j = 0; j < city_count; j++) {
+                if (!cities[j].visited) {
+                    int d = distance(cities[current], cities[j]);
+                    if (d < min_dist) {
+                        min_dist = d;
+                        next = j;
+                    }
+                }
             }
         }
         cities[next].visited = 1;
-        tour[i] = next;
         used[next] = 1;
+        tour[i] = next;
         current = next;
     }
 }
@@ -182,10 +221,34 @@ void copy_tour(int* dest, int* src, int n) {
 }
 
 void perturb_tour(int* tour, int n) {
-    int a = rand() % (n - 5);
-    int b = a + 2 + rand() % 3;
-    if (b >= n) b = n - 1;
-    reverse_segment(tour, a, b);
+    int worst_i = -1;
+    int worst_score = -1;
+
+    for (int i = 1; i < n - 2; i++) {
+        int prev = tour[i - 1];
+        int a = tour[i];
+        int b = tour[i + 1];
+        int next = tour[i + 2];
+
+        int d1 = distance(cities[prev], cities[a]) + distance(cities[b], cities[next]);
+        int d2 = distance(cities[prev], cities[b]) + distance(cities[a], cities[next]);
+
+        int gain = d1 - d2;
+        int penalty_margin = gain - penalty;
+
+        if (penalty_margin > worst_score) {
+            worst_score = penalty_margin;
+            worst_i = i;
+        }
+    }
+
+    if (worst_i == -1) worst_i = rand() % (n - 5);
+
+    int start = worst_i - 2;
+    int end = worst_i + 3;
+    if (start < 0) start = 0;
+    if (end >= n) end = n - 1;
+    reverse_segment(tour, start, end);
 }
 
 void iterated_local_search(int* tour, int* tour_size, int iterations) {
@@ -193,10 +256,11 @@ void iterated_local_search(int* tour, int* tour_size, int iterations) {
     copy_tour(best_tour, tour, *tour_size);
     int best_cost = compute_tour_cost(tour, *tour_size) + penalty * (city_count - *tour_size);
 
+    clock_t start = clock();
     for (int iter = 0; iter < iterations; iter++) {
         perturb_tour(tour, *tour_size);
         two_opt_with_candidates(tour, *tour_size);
-        three_opt_with_candidates(tour, *tour_size);
+        //three_opt_with_candidates(tour, *tour_size);
         int cost = compute_tour_cost(tour, *tour_size) + penalty * (city_count - *tour_size);
         if (cost < best_cost) {
             best_cost = cost;
@@ -206,6 +270,8 @@ void iterated_local_search(int* tour, int* tour_size, int iterations) {
             copy_tour(tour, best_tour, *tour_size);
         }
     }
+    clock_t end = clock();
+    printf("ILS total time: %.2f seconds\n", (double)(end - start) / CLOCKS_PER_SEC);
     copy_tour(tour, best_tour, *tour_size);
     free(best_tour);
 }
@@ -214,12 +280,13 @@ int main() {
     srand(time(NULL));
     read_input("example-input-3.txt");
 
+    build_candidate_set();
     int* tour = malloc(sizeof(int) * city_count);
     nearest_neighbour(tour);
-    build_candidate_set();
-    two_opt_with_candidates(tour, city_count);
-
     int tour_size = city_count;
+    two_opt_with_candidates(tour, tour_size);
+
+
     while (prune_tour(tour, &tour_size) > 0);
 
     int inserted = insert_skipped_cities(tour, &tour_size);
@@ -227,7 +294,8 @@ int main() {
 
     three_opt_with_candidates(tour, tour_size);
     two_opt_with_candidates(tour, tour_size);
-    iterated_local_search(tour, &tour_size, 100);
+
+    iterated_local_search(tour, &tour_size, 20);
     two_opt_with_candidates(tour, tour_size);
 
     int final_cost = compute_tour_cost(tour, tour_size) + (penalty * (city_count - tour_size));
@@ -239,13 +307,12 @@ int main() {
         for (int i = 0; i < tour_size; i++) {
             fprintf(out, "%d\n", cities[tour[i]].id);
         }
-        fprintf(out, "%d\n", cities[tour[0]].id);
         fclose(out);
         printf("Tour saved to final_tour.txt\n");
     } else {
         perror("Error writing tour to file");
     }
-
+    print_memory_usage();
     free(tour);
     return 0;
 }
