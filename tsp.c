@@ -85,7 +85,13 @@ void build_candidate_set() {
         free(tmp);
     }
 }
-
+void reverse_segment(int lo, int hi) {
+    while(lo!=hi && (lo+N-1)%N!=hi) {
+        int t=tour[lo]; tour[lo]=tour[hi]; tour[hi]=t;
+        position[tour[lo]]=lo; position[tour[hi]]=hi;
+        lo=(lo+1)%N; hi=(hi-1+N)%N;
+    }
+}
 void apply_2opt() {
     int improved = 1;
     while (improved) {
