@@ -1,14 +1,10 @@
-// Traveling Salesman Problem with Penalty in C
-// Pipeline: Nearest Neighbour -> 2-opt -> 3-opt -> Prune -> Reinsertion -> Iterated Local Search
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <time.h>
 #include <limits.h>
 
-#define MAX_CITIES 50000
-#define CANDIDATE_K 10
+#define MAX_NODES 60000
+#define K_NEAREST 10
 
 #ifdef _WIN32
 #include <windows.h>
@@ -17,16 +13,22 @@
 #endif
 
 typedef struct {
-    int id;
     int x, y;
-    int visited;
-} City;
+    int id;
+} Node;
 
+typedef struct {
+    int node;
+    int cost;
+} Edge;
+
+int skipped = 0;
 int penalty;
-int city_count = 0;
-City cities[MAX_CITIES];
-int candidate_set[MAX_CITIES][CANDIDATE_K];
-int used[MAX_CITIES];
+int N;
+Node nodes[MAX_NODES];
+int tour[MAX_NODES];
+Edge candidate[MAX_NODES][K_NEAREST];
+int position[MAX_NODES];
 
 void print_memory_usage() {
 #ifdef _WIN32
@@ -42,277 +44,285 @@ void print_memory_usage() {
 #endif
 }
 
-int distance(City a, City b) {
-    int dx = a.x - b.x;
-    int dy = a.y - b.y;
-    return (int)(sqrt(dx * dx + dy * dy) + 0.5);
+int distance(int i, int j) {
+    long long dx = nodes[i].x - nodes[j].x;
+    long long dy = nodes[i].y - nodes[j].y;
+    return (int)(sqrt((double)(dx * dx + dy * dy)) + 0.5);
 }
 
-void read_input(const char* filename) {
-    FILE *fp = fopen(filename, "r");
-    if (!fp) { perror("Error opening file"); exit(1); }
-    fscanf(fp, "%d", &penalty);
-    while (fscanf(fp, "%d %d %d", &cities[city_count].id, &cities[city_count].x, &cities[city_count].y) == 3) {
-        cities[city_count].visited = 0;
-        used[city_count] = 0;
-        city_count++;
-        if (city_count >= MAX_CITIES) { printf("Too many cities\n"); exit(1); }
+long long lower_triangle_index(long long i, long long j) {
+    return i * (i - 1) / 2 + j;  // valid only for i > j
+}
+void build_lower_triangle_matrix(int* distance_lower_triangle) {
+    printf("Building lower triangle matrix...%d\n", N);
+    for (long long i = 1; i < N; i++) {
+        for (long long j = 0; j < i; j++) {
+            //printf("%d\n", i);
+            distance_lower_triangle[lower_triangle_index(i, j)] = distance(i, j);
+        }
     }
+}
+ int get_distance(long long i, long long j, int* distance_lower_triangle) {
+    if (i == j) return 0;
+    return (i > j) ? distance_lower_triangle[lower_triangle_index(i, j)] : distance_lower_triangle[lower_triangle_index(j, i)];
+}
+
+void read_input(const char *filename) {
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        printf("Unable to open file %s\n", filename);
+        exit(1);
+    }
+
+    int id;
+    fscanf(fp, "%d", &penalty);
+    printf("girdi1");
+
+    N = 0;
+    while (fscanf(fp, "%d %d %d", &id, &nodes[N].x, &nodes[N].y) == 3) {
+        nodes[N].id = id;
+        tour[N] = N;
+        position[N] = N;
+        N++;
+    }
+    printf("%d\n", N);
     fclose(fp);
 }
 
-void build_candidate_set() {
-    for (int i = 0; i < city_count; i++) {
-        int dists[MAX_CITIES]; int ids[MAX_CITIES];
-        for (int j = 0; j < city_count; j++) {
-            dists[j] = (i == j) ? INT_MAX : distance(cities[i], cities[j]);
-            ids[j] = j;
+int cmp_edge(const void *p1, const void *p2) {
+    const Edge *e1 = (const Edge*)p1;
+    const Edge *e2 = (const Edge*)p2;
+    if (e1->cost < e2->cost) return -1;
+    if (e1->cost > e2->cost) return  1;
+    return 0;
+}
+
+void build_candidate_set(int* distance_lower_triangle) {
+    printf("girdi2");
+    int i, j, k;
+    for (i = 0; i < N; i++) {
+        Edge temp[N];
+        for (j = 0; j < N; j++) {
+            temp[j].node = j;
+            temp[j].cost = get_distance((long long)i, (long long)j, distance_lower_triangle);
         }
-        for (int k = 0; k < CANDIDATE_K; k++) {
-            int min_idx = k;
-            for (int j = k + 1; j < city_count; j++) {
-                if (dists[j] < dists[min_idx]) min_idx = j;
-            }
-            int temp_d = dists[k]; dists[k] = dists[min_idx]; dists[min_idx] = temp_d;
-            int temp_id = ids[k]; ids[k] = ids[min_idx]; ids[min_idx] = temp_id;
-            candidate_set[i][k] = ids[k];
+        qsort(temp, N, sizeof(Edge), cmp_edge);
+
+        for (k = 0; k < K_NEAREST; k++) {
+            candidate[i][k] = temp[k+1];
         }
     }
 }
 
-void nearest_neighbour(int* tour) {
-    for (int i = 0; i < city_count; i++) {
-        cities[i].visited = 0;
-        used[i] = 0;
-    }
-    int current = 0;
-    cities[current].visited = 1;
-    used[current] = 1;
-    tour[0] = current;
-    for (int i = 1; i < city_count; i++) {
-        int next = -1, min_dist = 1e9;
-        for (int k = 0; k < CANDIDATE_K; k++) {
-            int candidate = candidate_set[current][k];
-            if (!cities[candidate].visited) {
-                int d = distance(cities[current], cities[candidate]);
-                if (d < min_dist) {
-                    min_dist = d;
-                    next = candidate;
-                }
-            }
+void build_candidate_set_for_tour(int* distance_lower_triangle) {
+    int ii, jj, k;
+    for (ii = 0; ii < N; ii++) {
+        int a = tour[ii];      // ger?ek node id?si
+        static Edge temp[MAX_NODES];
+        for (jj = 0; jj < N; jj++) {
+            int c = tour[jj];
+            temp[jj].node = c;
+            temp[jj].cost = get_distance(a, c, distance_lower_triangle);
         }
-        if (next == -1) {
-            for (int j = 0; j < city_count; j++) {
-                if (!cities[j].visited) {
-                    int d = distance(cities[current], cities[j]);
-                    if (d < min_dist) {
-                        min_dist = d;
-                        next = j;
+        qsort(temp, N, sizeof(Edge), cmp_edge);
+        for (k = 0; k < K_NEAREST; k++) {
+            candidate[a][k] = temp[k+1];
+        }
+    }
+}
+
+void apply_2opt(int* distance_lower_triangle) {
+    printf("girdi3");
+    int improved = 1;
+    int i, k, a, b, c, c_idx, d;
+    int lo, hi, tmp;
+
+    while (improved) {
+        improved = 0;
+        for (i = 0; i < N - 1; i++) {
+            a = tour[i];
+            b = tour[(i+1) % N];
+
+            for (k = 0; k < K_NEAREST; k++) {
+                c = candidate[a][k].node;
+                c_idx = position[c];  // ARTIK O(1), lineer tarama yok
+
+                // a ve c tur i?inde ?ok yak?nsa atla:
+                int diff = abs(i - c_idx);
+                if (diff < 2 || diff > N - 2)
+                    continue;
+
+                d = tour[(c_idx + 1) % N];
+                int old_cost = get_distance(a, b, distance_lower_triangle) + get_distance(c, d, distance_lower_triangle);
+                int new_cost = get_distance(a, c, distance_lower_triangle) + get_distance(b, d, distance_lower_triangle);
+
+                if (new_cost < old_cost - 1e-6) {
+                    lo = (i + 1) % N;
+                    hi = c_idx;
+                    // Ters cevirme islemi:
+                    while (lo != hi && (lo + N - 1) % N != hi) {
+                        // tour[lo] ile tour[hi] takas
+                        tmp = tour[lo];
+                        tour[lo] = tour[hi];
+                        tour[hi] = tmp;
+
+                        // Pozisyon dizisini de g?ncelle
+                        position[tour[lo]] = lo;
+                        position[tour[hi]] = hi;
+
+                        lo = (lo + 1) % N;
+                        hi = (hi - 1 + N) % N;
                     }
+                    improved = 1;
+                    break;  // Bir swap yap?ld?, yeni turla yeniden ba?la
                 }
             }
+            if (improved) break;
         }
-        cities[next].visited = 1;
-        used[next] = 1;
-        tour[i] = next;
-        current = next;
     }
 }
 
-int compute_tour_cost(int* tour, int n) {
-    int total = 0;
-    for (int i = 0; i < n - 1; i++) total += distance(cities[tour[i]], cities[tour[i+1]]);
-    total += distance(cities[tour[n-1]], cities[tour[0]]);
-    return total;
-}
+long long tour_length(int* distance_lower_triangle) {
+	printf("CEZA %d",skipped);
+    printf("girdi4\n");
+    int i;
+    long long tcost = 0, dist = 0;
 
-void reverse_segment(int* tour, int i, int k) {
-    while (i < k) {
-        int tmp = tour[i];
-        tour[i] = tour[k];
-        tour[k] = tmp;
-        i++; k--;
+    for (i = 1; i < N; i++) {
+        dist = (long long)get_distance(tour[i-1], tour[i], distance_lower_triangle);
+        tcost += dist;
+        if (tcost < 0) {
+            printf("Overflow at i = %d: tcost = %lld\n", i, tcost);
+            exit(1);
+        }
     }
+    tcost += (long long)get_distance(tour[N-1], tour[0], distance_lower_triangle);
+    if (tcost < 0) {
+        printf("Overflow at goint end to start: %lld\n", tcost);
+        exit(1);
+    }
+    tcost += (long long)(skipped*penalty);
+    if (tcost < 0) {
+        printf("Overflow at adding penalty: %lld\n", tcost);
+        exit(1);
+    }
+    return tcost;
 }
 
-void two_opt_with_candidates(int* tour, int n) {
-    int improvement = 1;
-    while (improvement) {
-        improvement = 0;
-        for (int i = 1; i < n - 1; i++) {
-            int a = tour[i - 1], b = tour[i];
-            for (int k_idx = 0; k_idx < CANDIDATE_K; k_idx++) {
-                int c = candidate_set[b][k_idx], c_index = -1;
-                for (int x = 0; x < n; x++) if (tour[x] == c) { c_index = x; break; }
-                if (c_index <= i + 1) continue;
-                int d = tour[(c_index + 1) % n];
-                int currentDist = distance(cities[a], cities[b]) + distance(cities[c], cities[d]);
-                int newDist = distance(cities[a], cities[c]) + distance(cities[b], cities[d]);
-                if (newDist < currentDist) { reverse_segment(tour, i, c_index); improvement = 1; goto restart; }
+void compute_penalized_cost(int penalty, int* distance_lower_triangle) {
+    int dp[MAX_NODES];
+    int prev[MAX_NODES];
+    int i, j;
+
+    dp[0] = 0;
+    prev[0] = -1;
+
+    for (i = 1; i < N; i++) {
+        dp[i] = INT_MAX;
+        prev[i] = -1;
+
+        for (j = 1; j <= N && i - j >= 0; j++) {
+            int d = get_distance(tour[i - j], tour[i], distance_lower_triangle);
+            int total_cost = dp[i - j] + d + (j - 1) * penalty;
+
+            if (total_cost < dp[i]) {
+                dp[i] = total_cost;
+                prev[i] = i - j;
             }
         }
-    restart: ;
-    }
-}
 
-void three_opt_with_candidates(int* tour, int n) {
-    int improvement = 1;
-    while (improvement) {
-        improvement = 0;
-        for (int i = 0; i < n - 5; i++) {
-            int A = tour[i], B = tour[i + 1];
-            for (int k1 = 0; k1 < CANDIDATE_K; k1++) {
-                int C = candidate_set[B][k1], j = -1;
-                for (int x = 0; x < n; x++) if (tour[x] == C) { j = x; break; }
-                if (j <= i + 2 || j >= n - 2) continue;
-                int D = tour[j + 1];
-                for (int k2 = 0; k2 < CANDIDATE_K; k2++) {
-                    int E = candidate_set[D][k2], k = -1;
-                    for (int x = 0; x < n; x++) if (tour[x] == E) { k = x; break; }
-                    if (k <= j + 2 || k >= n - 1) continue;
-                    int F = tour[(k + 1) % n];
-                    int d0 = distance(cities[A], cities[B]) + distance(cities[C], cities[D]) + distance(cities[E], cities[F]);
-                    int d1 = distance(cities[A], cities[C]) + distance(cities[B], cities[E]) + distance(cities[D], cities[F]);
-                    if (d1 < d0) { reverse_segment(tour, i + 1, j); reverse_segment(tour, j + 1, k); improvement = 1; goto restart; }
-                }
-            }
-        }
-    restart: ;
-    }
-}
-
-int prune_tour(int* tour, int* tour_size) {
-    int removed = 0;
-    for (int i = 1; i < *tour_size - 1; i++) {
-        int prev = tour[i - 1], curr = tour[i], next = tour[i + 1];
-        int old_cost = distance(cities[prev], cities[curr]) + distance(cities[curr], cities[next]);
-        int new_cost = distance(cities[prev], cities[next]);
-        if ((old_cost - new_cost) > penalty) {
-            used[curr] = 0;
-            for (int j = i; j < *tour_size - 1; j++) tour[j] = tour[j + 1];
-            (*tour_size)--; removed++; i--;
-        }
-    }
-    return removed;
-}
-
-int insert_skipped_cities(int* tour, int* tour_size) {
-    int inserted = 0;
-    for (int c = 0; c < city_count; c++) {
-        if (used[c]) continue;
-        int best_pos = -1, best_gain = penalty;
-        for (int i = 0; i < *tour_size; i++) {
-            int a = tour[i], b = tour[(i + 1) % *tour_size];
-            int old_cost = distance(cities[a], cities[b]);
-            int new_cost = distance(cities[a], cities[c]) + distance(cities[c], cities[b]);
-            int gain = old_cost - new_cost;
-            if (gain > best_gain) { best_gain = gain; best_pos = i + 1; }
-        }
-        if (best_pos != -1) {
-            for (int j = *tour_size; j > best_pos; j--) tour[j] = tour[j - 1];
-            tour[best_pos] = c; (*tour_size)++; used[c] = 1; inserted++;
-        }
-    }
-    return inserted;
-}
-
-void copy_tour(int* dest, int* src, int n) {
-    for (int i = 0; i < n; i++) dest[i] = src[i];
-}
-
-void perturb_tour(int* tour, int n) {
-    int worst_i = -1;
-    int worst_score = -1;
-
-    for (int i = 1; i < n - 2; i++) {
-        int prev = tour[i - 1];
-        int a = tour[i];
-        int b = tour[i + 1];
-        int next = tour[i + 2];
-
-        int d1 = distance(cities[prev], cities[a]) + distance(cities[b], cities[next]);
-        int d2 = distance(cities[prev], cities[b]) + distance(cities[a], cities[next]);
-
-        int gain = d1 - d2;
-        int penalty_margin = gain - penalty;
-
-        if (penalty_margin > worst_score) {
-            worst_score = penalty_margin;
-            worst_i = i;
-        }
     }
 
-    if (worst_i == -1) worst_i = rand() % (n - 5);
 
-    int start = worst_i - 2;
-    int end = worst_i + 3;
-    if (start < 0) start = 0;
-    if (end >= n) end = n - 1;
-    reverse_segment(tour, start, end);
+    // Geriye do?ru en iyi yolu takip et
+    int new_tour[MAX_NODES];
+    int used[MAX_NODES];
+    for (i = 0; i < N; i++) used[i] = 0;
+
+    i = N - 1;
+    int new_len = 0;
+
+    while (i >= 0) {
+        new_tour[new_len] = tour[i];
+        used[tour[i]] = 1;
+        new_len++;
+        i = prev[i];
+    }
+
+    // Yeni turu ters ?evirip ana tour[]'a yaz
+    for (i = 0; i < new_len; i++) {
+        tour[i] = new_tour[new_len - 1 - i];
+        position[tour[i]] = i;
+    }
+
+    // Ziyaret edilmeyen node'lar i?in ceza hesapla
+    for (i = 0; i < N; i++) {
+        if (!used[i]) skipped++;
+    }
+    printf("%d",skipped);
+    // Yeni turun uzunlu?u art?k bu kadar
+    N = new_len;
 }
-
-void iterated_local_search(int* tour, int* tour_size, int iterations) {
-    int* best_tour = malloc(sizeof(int) * city_count);
-    copy_tour(best_tour, tour, *tour_size);
-    int best_cost = compute_tour_cost(tour, *tour_size) + penalty * (city_count - *tour_size);
-
-    clock_t start = clock();
-    for (int iter = 0; iter < iterations; iter++) {
-        perturb_tour(tour, *tour_size);
-        two_opt_with_candidates(tour, *tour_size);
-        //three_opt_with_candidates(tour, *tour_size);
-        int cost = compute_tour_cost(tour, *tour_size) + penalty * (city_count - *tour_size);
-        if (cost < best_cost) {
-            best_cost = cost;
-            copy_tour(best_tour, tour, *tour_size);
-            printf("[ILS] Improved to cost: %d at iteration %d\n", best_cost, iter + 1);
-        } else {
-            copy_tour(tour, best_tour, *tour_size);
+void checkNeg(int* distance_lower_triangle, long long matrix_size) {
+    for (long long i = 0; i < matrix_size; i++) {
+        if (distance_lower_triangle[i] < 0) {
+            printf("Overflow at i = %lld\n", i);
+            exit(1);
         }
     }
-    clock_t end = clock();
-    printf("ILS total time: %.2f seconds\n", (double)(end - start) / CLOCKS_PER_SEC);
-    copy_tour(tour, best_tour, *tour_size);
-    free(best_tour);
+    printf("No problem");
 }
 
 int main() {
-    srand(time(NULL));
-    read_input("example-input-3.txt");
+    FILE *out;
+    int i;
+    read_input("example-input-2.txt");
+    int input_len = N;
+    long long matrix_size = (long long)N * (N - 1) / 2;
+    printf("Matrix size: %lld\n", matrix_size);
 
-    build_candidate_set();
-    int* tour = malloc(sizeof(int) * city_count);
-    nearest_neighbour(tour);
-    int tour_size = city_count;
-    two_opt_with_candidates(tour, tour_size);
+    size_t total_bytes = (size_t)matrix_size * sizeof(int);
+    printf("Total memory needed: %.2f MB\n", total_bytes / (1024.0 * 1024.0));
 
-
-    while (prune_tour(tour, &tour_size) > 0);
-
-    int inserted = insert_skipped_cities(tour, &tour_size);
-    if (inserted > 0) two_opt_with_candidates(tour, tour_size);
-
-    three_opt_with_candidates(tour, tour_size);
-    two_opt_with_candidates(tour, tour_size);
-
-    iterated_local_search(tour, &tour_size, 20);
-    two_opt_with_candidates(tour, tour_size);
-
-    int final_cost = compute_tour_cost(tour, tour_size) + (penalty * (city_count - tour_size));
-    printf("Final tour cost: %d\n", final_cost);
-    printf("Final tour length: %d cities (removed: %d)\n", tour_size, city_count - tour_size);
-
-    FILE* out = fopen("final_tour.txt", "w");
-    if (out) {
-        for (int i = 0; i < tour_size; i++) {
-            fprintf(out, "%d\n", cities[tour[i]].id);
-        }
-        fclose(out);
-        printf("Tour saved to final_tour.txt\n");
-    } else {
-        perror("Error writing tour to file");
+    int* distance_lower_triangle = malloc(total_bytes);
+    if (!distance_lower_triangle) {
+        printf("Memory allocation failed!\n");
+        return 1;
     }
+    if (!distance_lower_triangle) {
+        printf("Memory allocation failed.\n");
+        return 1;
+    }
+    build_lower_triangle_matrix(distance_lower_triangle);
+    printf("Matrix constructed.\n");
+    checkNeg(distance_lower_triangle, matrix_size);
+
+    build_candidate_set(distance_lower_triangle);
+	printf("Initial tour length: %lld\n", tour_length(distance_lower_triangle));
+
+	apply_2opt(distance_lower_triangle);
+    printf("After 2-opt tour length: %lld\n", tour_length(distance_lower_triangle));
+
+    compute_penalized_cost(penalty,distance_lower_triangle);
+	printf("After penalyty tour length: %lld\n", tour_length(distance_lower_triangle));
+
+	build_candidate_set_for_tour(distance_lower_triangle);
+
+	for (i = 0; i < N; i++)
+    	position[tour[i]] = i;
+
+	apply_2opt(distance_lower_triangle);
+    long long finalCost = tour_length(distance_lower_triangle);
+    printf("After 2opt second tour length: %lld\n", finalCost);
+    
+    out = fopen("tour_output.txt", "w");
+    fprintf(out, "%lld %d\n", finalCost, input_len-skipped);
+    for (i = 0; i < N; i++) {
+        fprintf(out, "%d\n", nodes[tour[i]].id);
+    }
+    fclose(out);
+    
     print_memory_usage();
-    free(tour);
+    free(distance_lower_triangle);
     return 0;
 }
