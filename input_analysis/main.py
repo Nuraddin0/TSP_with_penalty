@@ -1,7 +1,9 @@
+import time
+
 import matplotlib.pyplot as plt
 
 # Read the input file
-filename = "example-input-1.txt"
+filename = "test-input-4.txt"
 cities = []
 
 with open(filename, "r") as file:
@@ -18,15 +20,10 @@ y_coords = [city[2] for city in cities]
 # Plotting
 plt.figure(figsize=(40, 32))
 plt.scatter(x_coords, y_coords, color='blue', marker='o')
-
-# Label each point with its city ID
-#for city_id, x, y in cities:
- #   plt.text(x, y, str(city_id), fontsize=8, ha='right', va='bottom')
-
-
+plt.text(x, y, str(city_id), fontsize=8, ha='right', va='bottom')
 
 path=[]
-fileOut = "final_tour.txt"
+fileOut = "output-4.txt"
 with open(fileOut, "r") as file2:
     for line in file2:
         id = line.strip()
@@ -55,9 +52,10 @@ plt.quiver(path_x_coords[:-1], path_y_coords[:-1], dx, dy, angles='xy', scale_un
                 scale=1, color='orange', width=0.003, headwidth=3, headlength=5, alpha=1)
 
 plt.scatter(path_x_coords, path_y_coords, color='red', marker='x')
+plt.scatter(path_x_coords[0], path_y_coords[0], color='lime', marker='*', s=400, edgecolors='black', label='Start Node')
+
 
 '''
-
 path2=[]
 fileOut2 = "best_tour_2.txt"
 with open(fileOut2, "r") as file2:
@@ -90,8 +88,10 @@ plt.quiver(path_x_coords2[:-1], path_y_coords2[:-1], dx2, dy2, angles='xy', scal
 plt.scatter(path_x_coords2, path_y_coords2, color='pink', marker='o')
 '''
 
+
 plt.title("City Coordinates")
 plt.xlabel("X Coordinate")
 plt.ylabel("Y Coordinate")
 plt.grid(True)
 plt.show()
+
