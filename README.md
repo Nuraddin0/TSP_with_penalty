@@ -1,10 +1,5 @@
 # TSP with Penalty (Prize-Collecting TSP)
 
-## 🏫 Marmara University  
-**Faculty of Engineering**
-
----
-
 ## 📌 Introduction
 
 The **Traveling Salesman Problem (TSP)** is a well-known NP-Hard optimization problem where a salesman must visit all given cities exactly once and return to the starting city with the **minimum total cost** (typically distance). 
