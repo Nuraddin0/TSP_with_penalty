@@ -1,5 +1,16 @@
 # TSP with Penalty (Prize-Collecting TSP)
 
+---
+
+## 🗂️ Table of Contents
+1. [Introduction](#-introduction)
+2. [Purpose](#-purpose)
+3. [Algorithms Used](#-algorithms-used-in-the-project)
+4. [Our Algorithm](#️-our-algorithm-for-tsp-with-penalty)
+5. [Ideas Behind](#-ideas-behind-the-algorithm)
+
+---
+
 ## 📌 Introduction
 
 The **Traveling Salesman Problem (TSP)** is a well-known NP-Hard optimization problem where a salesman must visit all given cities exactly once and return to the starting city with the **minimum total cost** (typically distance). 
@@ -63,15 +74,6 @@ Our approach is driven by:
 ### 3. **Problem Reduction-Inspired Thinking**
 - We start by solving the basic TSP as a **base case**, then enhance it for the penalized variant.
 - This reuse of the simpler problem solution reflects a problem-reduction mindset.
-
----
-
-## 🗂️ Table of Contents
-1. [Introduction](#-introduction)
-2. [Purpose](#-purpose)
-3. [Algorithms Used](#-algorithms-used-in-the-project)
-4. [Our Algorithm](#️-our-algorithm-for-tsp-with-penalty)
-5. [Ideas Behind](#-ideas-behind-the-algorithm)
 
 ---
 
